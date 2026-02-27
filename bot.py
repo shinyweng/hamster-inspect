@@ -1,6 +1,7 @@
 import discord
 import os
 import aiohttp
+import re
 from dotenv import load_dotenv
 
 # Load the keys from your .env file
@@ -12,6 +13,95 @@ OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 intents = discord.Intents.default()
 intents.message_content = True
 client = discord.Client(intents=intents)
+
+HAMSTER_KEYWORDS = {
+    "hamster",
+    "hammy",
+    "hamtaro",
+}
+
+
+def _extract_strings(value):
+    """Recursively flatten nested metadata into strings."""
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, dict):
+        flattened = []
+        for nested in value.values():
+            flattened.extend(_extract_strings(nested))
+        return flattened
+    if isinstance(value, (list, tuple, set)):
+        flattened = []
+        for nested in value:
+            flattened.extend(_extract_strings(nested))
+        return flattened
+    return [str(value)]
+
+
+def metadata_indicates_hamster(*parts):
+    """Free hamster detection from Discord metadata (filenames, embed text, URLs)."""
+    searchable_text = " ".join(_extract_strings(parts)).lower()
+    normalized = re.sub(r"[^a-z0-9]+", " ", searchable_text)
+    tokens = set(normalized.split())
+
+    if any(keyword in searchable_text for keyword in HAMSTER_KEYWORDS):
+        return True
+
+    return "hampter" in tokens
+
+
+def collect_media_candidates(message):
+    """Collect all media URLs and cheap metadata from a Discord message."""
+    candidates = []
+
+    for attachment in message.attachments:
+        if attachment.content_type and attachment.content_type.startswith(('image/', 'video/')):
+            candidates.append(
+                {
+                    "url": attachment.url,
+                    "metadata": [
+                        message.content,
+                        attachment.filename,
+                        attachment.description,
+                        attachment.proxy_url,
+                        attachment.content_type,
+                    ],
+                }
+            )
+
+    for embed in message.embeds:
+        if embed.type in ['gifv', 'image', 'video', 'rich']:
+            media_url = None
+            if embed.video:
+                media_url = embed.video.url
+            elif embed.image:
+                media_url = embed.image.url
+            elif embed.thumbnail:
+                media_url = embed.thumbnail.url
+            elif embed.url:
+                media_url = embed.url
+
+            if media_url:
+                candidates.append(
+                    {
+                        "url": media_url,
+                        "metadata": [
+                            message.content,
+                            embed.title,
+                            embed.description,
+                            embed.url,
+                            embed.type,
+                            embed.provider.name if embed.provider else None,
+                            embed.author.name if embed.author else None,
+                            embed.footer.text if embed.footer else None,
+                            embed.to_dict(),
+                        ],
+                    }
+                )
+
+    return candidates
 
 async def analyze_image_for_hamster(image_url):
     """Sends the image URL to OpenRouter's vision model."""
@@ -62,32 +152,26 @@ async def on_message(message):
     if message.author == client.user:
         return
 
-    image_url_to_check = None
+    media_candidates = collect_media_candidates(message)
 
-    # 1. Check for uploaded attachments (Files from computer/phone)
-    for attachment in message.attachments:
-        if attachment.content_type and attachment.content_type.startswith(('image/', 'video/')):
-            image_url_to_check = attachment.url
-            break # Found one, stop looking
+    for candidate in media_candidates:
+        image_url_to_check = candidate["url"]
+        metadata = candidate["metadata"]
 
-    # 2. Check for Embeds (Discord's built-in GIF button / pasted links)
-    if not image_url_to_check:
-        for embed in message.embeds:
-            if embed.type in ['gifv', 'image']:
-                # Grab the actual image URL from the embed
-                image_url_to_check = embed.thumbnail.url if embed.thumbnail else embed.url
-                break
+        if metadata_indicates_hamster(*metadata):
+            print(f"Metadata hit for hamster from {message.author}: {image_url_to_check}")
+            is_hamster = True
+        else:
+            print(f"Checking media from {message.author}: {image_url_to_check}")
+            is_hamster = await analyze_image_for_hamster(image_url_to_check)
 
-    # If we found an image or GIF, send it to the AI
-    if image_url_to_check:
-        print(f"Checking image from {message.author}...")
-        is_hamster = await analyze_image_for_hamster(image_url_to_check)
-        
         if is_hamster:
             try:
                 await message.delete()
                 await message.channel.send(f"🚨 {message.author.mention}, hamster detected and deleted! 🚨")
+                return
             except discord.Forbidden:
                 print("Error: Bot doesn't have permission to delete messages in this channel.")
+                return
 
 client.run(TOKEN)
