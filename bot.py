@@ -128,7 +128,8 @@ async def analyze_image_for_hamster(image_url):
         # Send request to OpenRouter
         async with session.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload) as resp:
             if resp.status != 200:
-                print(f"Error from OpenRouter: {resp.status}")
+                error_text = await resp.text()
+                print(f"Error from OpenRouter: status={resp.status}, body={error_text}")
                 return False
             
             data = await resp.json()
