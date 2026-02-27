@@ -27,7 +27,7 @@ async def analyze_image_for_hamster(image_url):
             {
                 "role": "user",
                 "content": [
-                    {"type": "text", "text": "Is there a hamster in this image? Answer strictly with one word: YES or NO."},
+                    {"type": "text", "text": "Is there a hamster (hamtaro included) in this image? Answer strictly with one word: YES or NO."},
                     {"type": "image_url", "image_url": {"url": image_url}}
                 ]
             }
