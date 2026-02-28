@@ -22,7 +22,7 @@ async def analyze_image_for_hamster(session: aiohttp.ClientSession, image_url: s
         "Content-Type": "application/json"
     }
 
-    # 1. Prepare the payload with the URL natively (No Base64 downloading required!)
+    # 1. Prepare the payload with the URL natively
     payload = {
         "model": "openai/gpt-4o-mini",
         "messages": [
@@ -51,7 +51,6 @@ async def analyze_image_for_hamster(session: aiohttp.ClientSession, image_url: s
             print(f"AI sees: {answer}")
             return "YES" in answer
 
-    # --- Robust Error Handling ---
     except asyncio.TimeoutError:
         print("Timeout: Contacting OpenRouter took too long.")
         return False
@@ -70,7 +69,7 @@ class HamsterBot(discord.Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.session = None # Placeholder for our web session
-        self.forbidden_words = ["hamster", "hamtaro", "hammy"]
+        self.forbidden_words = ["hamster", "hamtaro", "hammy", "ebichu", "hampter"]
 
     async def setup_hook(self):
         # Initialize the session once when the bot starts

@@ -16,6 +16,7 @@ class GrokSummarizer(discord.Client):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.session = None # Placeholder for our aiohttp web session
+        self.grok_role_id = "1467201281746796729" # Stored for easy access
 
     async def setup_hook(self):
         # Initialize the session once when the bot starts
@@ -28,25 +29,33 @@ class GrokSummarizer(discord.Client):
         await super().close()
 
     async def on_ready(self):
-        print(f'✅ Logged in as {self.user} - Ready to summarize with Grok!')
+        print(f'✅ Logged in as {self.user} - Ready to assist with Grok!')
 
-    async def fetch_grok_summary(self, chat_log: str) -> str:
-        """Sends the compiled chat history to OpenRouter's Grok model."""
+    async def fetch_grok_response(self, chat_log: str, user_prompt: str = None) -> str:
+        """Sends the compiled chat history and optional user prompt to OpenRouter."""
         headers = {
             "Authorization": f"Bearer {OPENROUTER_API_KEY}",
             "Content-Type": "application/json"
         }
         
+        # Determine the system and user instructions based on the presence of a user_prompt
+        if user_prompt:
+            system_instruction = "Accurately answer the user's prompt in 1-3 sentences, concisely."
+            user_content = f"User's prompt: {user_prompt}"
+        else:
+            system_instruction = "Read the following chat history and provide a concise, readable summary of the conversation. Focus on the main topics and any conclusions reached in 3 sentences max."
+            user_content = f"Here is the recent chat history:\n\n{chat_log}"
+
         payload = {
             "model": "openai/gpt-4o-mini", 
             "messages": [
                 {
                     "role": "system", 
-                    "content": "Read the following chat history and provide a concise, readable summary of the conversation. Focus on the main topics and any conclusions reached in 3 sentences max."
+                    "content": system_instruction
                 },
                 {
                     "role": "user", 
-                    "content": f"Here is the recent chat history:\n\n{chat_log}"
+                    "content": user_content
                 }
             ]
         }
@@ -57,7 +66,7 @@ class GrokSummarizer(discord.Client):
                 if resp.status != 200:
                     error_text = await resp.text()
                     print(f"Error from OpenRouter: status={resp.status}, body={error_text}")
-                    return "⚠️ Sorry, I ran into an API error while trying to summarize."
+                    return "⚠️ Sorry, I ran into an API error while trying to process that."
                 
                 data = await resp.json()
                 return data['choices'][0]['message']['content'].strip()
@@ -73,13 +82,18 @@ class GrokSummarizer(discord.Client):
         if message.author == self.user:
             return
         
-        # Hardcoded, because role names are not provided by Discord 
-        grok_role_mentioned = any(role.id == 1467201281746796729 for role in message.role_mentions) or "<@&1467201281746796729>" in message.content
+        # Check if the specific role was mentioned
+        grok_role_mentioned = any(role.id == int(self.grok_role_id) for role in message.role_mentions)
         
         if grok_role_mentioned:
+            # Extract any text sent alongside the tag
+            clean_prompt = message.content.replace(f"<@&{self.grok_role_id}>", "").strip()
             
-            # Send a loading message so users know it's working
-            loading_msg = await message.channel.send("Reading the last 30 messages... ⏳")
+            # Send an appropriate loading message
+            if not clean_prompt:
+                loading_msg = await message.channel.send("Reading the last 30 messages... ⏳")
+            else:
+                loading_msg = await message.channel.send("Thinking... ⏳")
 
             try:
                 # 1. Fetch the last 31 messages (30 history + the trigger message itself)
@@ -94,16 +108,19 @@ class GrokSummarizer(discord.Client):
                     if msg.content.strip():
                         chat_log += f"[{msg.author.display_name}]: {msg.content}\n"
 
-                # 3. Check if there's actually anything to summarize
+                # 3. Check if there's actually anything to read
                 if not chat_log.strip():
-                    await loading_msg.edit(content="There is no recent text history to summarize here.")
+                    await loading_msg.edit(content="There is no recent text history here.")
                     return
 
                 # 4. Call the AI
-                summary = await self.fetch_grok_summary(chat_log)
+                response = await self.fetch_grok_response(chat_log, user_prompt=clean_prompt if clean_prompt else None)
 
-                # 5. Edit the loading message with the final summary
-                await loading_msg.edit(content=f"**Grok's Summary:**\n\n{summary}")
+                # 5. Edit the loading message with the final result
+                if not clean_prompt:
+                    await loading_msg.edit(content=f"**Grok's Summary:**\n\n{response}")
+                else:
+                    await loading_msg.edit(content=f"**Grok:** {response}")
 
             except discord.Forbidden:
                 await loading_msg.edit(content="⚠️ I don't have permission to read message history in this channel.")
