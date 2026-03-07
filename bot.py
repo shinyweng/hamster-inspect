@@ -121,7 +121,7 @@ class HamsterBot(discord.Client):
 
         # Attachments
         for attachment in message.attachments:
-            if attachment.content_type and attachment.content_type.startswith('image/'):
+            if attachment.content_type and attachment.content_type.startswith(('image/', 'video/')):
                 urls_to_check.append(attachment.url)
 
         # Embeds
